@@ -62,11 +62,13 @@ enum SelfTest {
             check("EVM 链共用地址", evm.count < 2 || Set(evm.map(\.address)).count == 1,
                   evm.map(\.chain).joined(separator: "/"))
 
-            // 6. 清单里不含助记词
-            let plist = UserDefaults.standard.data(forKey: "gem.demo.wallets") ?? Data()
-            let raw = String(data: plist, encoding: .utf8) ?? ""
-            check("清单不含助记词", !words.contains { raw.contains($0) })
-            check("清单不含 keystoreId", !raw.contains(w.keystoreId))
+            // 6. 直接扫数据库文件的原始字节 —— 比查字段更硬，
+            //    连写进未使用列或残留页的情况都能抓到。
+            let dbBytes = (try? Data(contentsOf: URL(fileURLWithPath: WalletDatabase.databasePath))) ?? Data()
+            let raw = String(decoding: dbBytes, as: UTF8.self)
+            check("数据库不含助记词", !words.contains { raw.contains($0) },
+                  "\(dbBytes.count) 字节")
+            check("数据库不含 keystoreId", !raw.contains(w.keystoreId))
 
             // 7. 删除：文件与清单都要清
             try WalletFactory.delete(added)

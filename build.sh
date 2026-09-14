@@ -2,7 +2,9 @@
 #
 # 从「已发布的 gemstone-swift」构建一个可在 iOS 模拟器里运行的 App
 #
-# 用法: ./build.sh [模拟器名]          默认 "iPhone 17"
+# 用法: ./build.sh [模拟器名] [--clean]
+#         模拟器名   默认 "iPhone 17"
+#         --clean    先卸载再装，清空钱包数据（默认覆盖安装，数据保留）
 #
 # 为什么不用 Xcode 工程：
 #   这个 demo 的目的是验证**已发布制品**能被下游真实消费。手工 swiftc 的好处是
@@ -13,7 +15,18 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-SIM_NAME="${1:-iPhone 17}"
+# --clean 才清数据。默认覆盖安装，钱包数据跨重编保留 ——
+# simctl install 覆盖装等同于 App 升级，容器不动；uninstall 才会连容器一起删。
+CLEAN=0
+ARGS=()
+for a in "$@"; do
+    case "$a" in
+        --clean) CLEAN=1 ;;
+        *)       ARGS+=("$a") ;;
+    esac
+done
+
+SIM_NAME="${ARGS[0]:-iPhone 17}"
 BUNDLE_ID="com.example.gemiosdemo"
 TARGET="arm64-apple-ios17.0-simulator"
 
@@ -59,8 +72,8 @@ step "编译 App 并链接"
 swiftc -target "$TARGET" -sdk "$SDK" -parse-as-library \
     -I build -I "$XCF/Headers" \
     -L build -lGemstoneSwift \
-    -L "$XCF" -lgemstone \
-    App.swift WalletView.swift WalletStore.swift WalletDetailView.swift SelfTest.swift -o build/GemIOSDemo
+    -L "$XCF" -lgemstone -lsqlite3 \
+    App.swift WalletView.swift WalletStore.swift WalletDetailView.swift WalletDatabase.swift SelfTest.swift -o build/GemIOSDemo
 info "可执行文件 $(du -h build/GemIOSDemo | cut -f1)"
 
 # 自检：确认不是误编成 macOS 产物
@@ -108,7 +121,10 @@ xcrun simctl boot "$UDID" 2>/dev/null || true
 xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1 || true
 open -a Simulator
 
-xcrun simctl uninstall "$UDID" "$BUNDLE_ID" 2>/dev/null || true
+if [ "$CLEAN" -eq 1 ]; then
+    xcrun simctl uninstall "$UDID" "$BUNDLE_ID" 2>/dev/null || true
+    info "已清除既有数据（--clean）"
+fi
 xcrun simctl install "$UDID" "$APP"
 xcrun simctl launch "$UDID" "$BUNDLE_ID"
 

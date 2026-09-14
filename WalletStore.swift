@@ -30,67 +30,15 @@ struct WalletEntry: Codable, Identifiable, Equatable {
     var keystoreId: String { keystoreIdForWallet(walletId: walletId) }
 }
 
-/// 列表持久化。
+/// 钱包清单。实际存储在 SQLite，见 WalletDatabase。
 ///
-/// ⚠️ 演示用 UserDefaults。真实产品应该用 SQLite——
-///    gem 主 App 走的是 GRDB，两张表：
-///      wallets(id, name, type, index, order, isPinned, imageUrl, source, updatedAt)
-///      wallets_accounts(walletId, chain, address, derivationPath, extendedPublicKey, index)
-///    注意这个「一对多」结构和下面的 WalletEntry.accounts 是同一个意思。
-///    用数据库的关键原因是**响应式查询**：数据一变 UI 自动刷新，
-///    UserDefaults 没有这个能力，所以本 demo 得手动 reload。
+/// 🔴 清单里没有助记词、私钥、密码 —— 表结构里根本没有它们的位置。
+///    固定 schema 比运行时断言更强：想存秘密得先显式改表。
+///    秘密只在加密的 keystore 文件里，由 Rust 管。
 enum WalletStore {
-    private static let key = "gem.demo.wallets"
-
-    /// 🔴 清单里允许出现的字段白名单。
-    ///    助记词、私钥、密码一律不得进入 —— 它存在 UserDefaults，
-    ///    既不加密也会进 iTunes/iCloud 备份。秘密只能留在加密的 keystore 文件里。
-    ///    save() 会强制校验，加了新字段忘记评估敏感性时会崩在 debug 构建。
-    private static let allowedWalletKeys: Set<String> = ["walletId", "createdAt", "accounts"]
-    private static let allowedAccountKeys: Set<String> = ["chain", "address", "derivationPath"]
-
-    static func all() -> [WalletEntry] {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let list = try? JSONDecoder().decode([WalletEntry].self, from: data)
-        else { return [] }
-        return list.sorted { $0.createdAt > $1.createdAt }
-    }
-
-    static func upsert(_ entry: WalletEntry) {
-        var list = all().filter { $0.walletId != entry.walletId }
-        list.append(entry)
-        save(list)
-    }
-
-    static func remove(walletId: String) {
-        save(all().filter { $0.walletId != walletId })
-    }
-
-    private static func save(_ list: [WalletEntry]) {
-        guard let data = try? JSONEncoder().encode(list) else { return }
-        assertNoSecrets(data)
-        UserDefaults.standard.set(data, forKey: key)
-    }
-
-    /// 把「清单不许存秘密」从注释约定变成运行时强制。
-    /// 只在 debug 生效，release 构建零开销。
-    private static func assertNoSecrets(_ data: Data) {
-        #if DEBUG
-        guard let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else { return }
-        for wallet in arr {
-            let extra = Set(wallet.keys).subtracting(allowedWalletKeys)
-            assert(extra.isEmpty,
-                   "WalletEntry 出现未经评估的字段 \(extra)。"
-                   + "确认不含助记词/私钥/密码后，再加进 allowedWalletKeys。")
-
-            for account in (wallet["accounts"] as? [[String: Any]]) ?? [] {
-                let e = Set(account.keys).subtracting(allowedAccountKeys)
-                assert(e.isEmpty, "AccountEntry 出现未经评估的字段 \(e)。")
-            }
-        }
-        #endif
-    }
+    static func all() -> [WalletEntry] { WalletDatabase.shared.all() }
+    static func upsert(_ entry: WalletEntry) { WalletDatabase.shared.upsert(entry) }
+    static func remove(walletId: String) { WalletDatabase.shared.remove(walletId: walletId) }
 }
 
 /// 钱包创建与读取。

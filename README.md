@@ -27,26 +27,46 @@ Rust 从不告诉你有哪些钱包 —— 它只按 id 收活。App 不自己�
 | | 存什么 | 在哪 |
 |---|---|---|
 | Rust | 加密的密钥材料 | `<baseDir>/<keystoreId>.json`，一钱包一文件 |
-| App | 钱包清单与元数据 | SQLite（本 demo 用 UserDefaults 从简） |
+| App | 钱包清单与元数据 | SQLite |
 
-清单里**只放找得回来所需的最小信息**，秘密仍留在加密文件里。实测 UserDefaults 内容：
+表结构照搬 gem 主 App 的设计：
 
-```json
-[{ "walletId": "multicoin_0x98200302…", "keystoreId": "b74f9283-…",
-   "chain": "ethereum", "address": "0x98200302…", "createdAt": 811068890.39 }]
+```sql
+CREATE TABLE wallets (
+    id TEXT PRIMARY KEY NOT NULL,          -- walletId
+    created_at REAL NOT NULL
+);
+CREATE TABLE wallets_accounts (
+    wallet_id       TEXT NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
+    chain           TEXT NOT NULL,
+    address         TEXT NOT NULL,
+    derivation_path TEXT NOT NULL,
+    account_index   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (wallet_id, chain)
+);
 ```
 
-助记词一个字都没有 —— 详情页的助记词是 `exportRecoveryPhrase()` 现场解出来的，
-所以杀掉 App 重启后照样能显示。
+**表里没有助记词、私钥、密码的位置** —— 固定 schema 比运行时校验更强，
+想存秘密得先显式改表。自检会直接扫数据库文件的原始字节确认这一点。
 
-> 真实产品应该用 SQLite 而非 UserDefaults，关键原因是**响应式查询**：
-> GRDB / Room 能在数据变化时自动刷新 UI，UserDefaults 只能手动 reload。
-> gem 主 App 的两张表：`wallets` 与 `wallets_accounts`。
+详情页的助记词是 `exportRecoveryPhrase()` 现场解出来的，所以杀掉 App 重启后照样能显示。
+
+> `account_index` 现在恒为 0：core 的 `default_derivation_path` 是编译期常量，
+> 一条链只能派生一个地址（做不了 MetaMask 那种同链多账户）。
+> 留着这列是零成本对冲 —— core 若支持了，App 侧不用改表结构。
+>
+> 本 demo 用裸 `libsqlite3`（SDK 自带，无外部依赖）。
+> 真实项目请用 GRDB：它提供**响应式查询**，数据变了 UI 自动刷新，
+> 这正是「钱包清单该放数据库而不是 UserDefaults」的核心理由。
 
 ```bash
-./build.sh                    # 编译 + 装进模拟器 + 启动
+./build.sh                    # 编译 + 装进模拟器 + 启动（钱包数据保留）
 ./build.sh "iPhone 17 Pro"    # 指定机型
+./build.sh --clean            # 清空钱包数据重来
 ```
+
+> 默认**覆盖安装**，钱包数据跨重编保留（等同 App 升级）。
+> 加 `--clean` 才会 `simctl uninstall`，连容器一起删。
 
 > 🔴 **需要 Apple Silicon 的 Mac**（发布的库只有 arm64 切片，Intel 跑不了模拟器）。
 > 模拟器怎么选、有哪些坑，见 [SIMULATOR.md](SIMULATOR.md)。
@@ -324,7 +344,8 @@ GemIOSDemo/
 ├── Package.swift      依赖 gemstone-swift 2.114.10
 ├── App.swift          Tab 容器 + FFI 页（AlienProvider 实现）
 ├── WalletView.swift   钱包列表 + 生成
-├── WalletStore.swift  列表持久化 + WalletFactory（创建/解密/删除）
+├── WalletStore.swift  清单接口 + WalletFactory（创建/解密/删除）
+├── WalletDatabase.swift    SQLite 持久化（两张表）
 ├── WalletDetailView.swift  详情：助记词现场解密
 ├── SelfTest.swift     无头自检（-selftest）
 ├── build.sh           五步构建脚本
