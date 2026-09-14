@@ -208,13 +208,24 @@ xcrun simctl shutdown all
 
 ### 🔴 没有 `input tap` 的应对
 
-iOS 模拟器无法命令行注入点击。本 Demo 的做法是**进页面自动触发一次**：
+iOS 模拟器无法命令行注入点击。本 Demo 用**启动参数**解决：
 
-```swift
-.task { fetch() }   // 按钮保留，可手动重跑
+```bash
+# 直接跳到钱包页并触发生成，无需点击
+xcrun simctl launch <UDID> com.example.gemiosdemo -autowallet
 ```
 
-走的是同一条代码路径，不降低验证强度，但让无人值守的验证成为可能。
+```swift
+// App.swift
+static var autoWallet: Bool {
+    ProcessInfo.processInfo.arguments.contains("-autowallet")
+}
+```
+
+正常使用不带参数，仍然要手点按钮；只有自动化验证才走这条路径。
+走的是同一份代码，不降低验证强度。
+
+FFI 页的网络请求则是进页面自动跑一次（`.task { fetch() }`）。
 
 其他方案（`osascript` 点窗口、XCUITest）要么依赖辅助功能授权、
 要么要建完整测试 target，对验证场景都太重。

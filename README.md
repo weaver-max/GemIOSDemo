@@ -2,12 +2,20 @@
 
 iOS 端调用 Rust 编译产物（`gemstone-swift`）的最小可运行示例。
 
-跑起来是这样：
+两个页面：
+
+| Tab | 演示什么 |
+|---|---|
+| **FFI** | `libVersion()` 正向调用 + `AlienProvider` 反向回调 |
+| **钱包** | 生成助记词 → 建 keystore → 落盘 → 显示地址 |
 
 ```
-Gemstone lib version: 2.114.10          ← Swift 调 Rust
-https://httpbin.org/get?foo=bar
--> 200, 464 bytes                        ← Rust 回调 Swift
+FFI                              钱包
+Gemstone lib version: 2.114.10   助记词 dutch pistol summer …
+https://httpbin.org/get?foo=bar  walletId   multicoin_0x1C20…
+-> 200, 464 bytes                keystoreId 995a0d9c-f1a3-5d95-…
+                                 地址       0x1C20353b00aE4642…
+                                 ✓ keystore 文件已写入 (630 字节)
 ```
 
 ```bash
@@ -95,7 +103,15 @@ let wallet = try keystore.createStore(
     password: passwordData
 )
 // wallet.walletId / wallet.keystoreId / wallet.accounts
+// accounts[0].address / .chain / .derivationPath / .publicKey
 ```
+
+完整可运行版本见 [WalletView.swift](WalletView.swift)。
+
+> 🔴 **`createStore` 很重**：Argon2id 用 19 MiB 内存、2 轮迭代，
+> 必须放到后台线程。注意 SwiftUI 的 `View` 默认是 `@MainActor`——
+> 把创建逻辑写成 View 的方法，即使包在 `Task.detached` 里也会被弹回主 actor。
+> 要放在 View **外面**的类型里，见 `WalletFactory`。
 
 ### 3.3 反向回调 —— Rust 调你写的 Swift
 
@@ -261,7 +277,8 @@ Xcode 会自动选。手工编译要显式指向对的那个。
 ```
 GemIOSDemo/
 ├── Package.swift      依赖 gemstone-swift 2.114.10
-├── App.swift          SwiftUI App + AlienProvider 实现
+├── App.swift          Tab 容器 + FFI 页（AlienProvider 实现）
+├── WalletView.swift   钱包页（生成 → 落盘 → 显示地址）
 ├── build.sh           五步构建脚本
 ├── README.md          本文件 —— 怎么调用
 └── SIMULATOR.md       模拟器选择与注意事项

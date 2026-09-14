@@ -91,7 +91,25 @@ struct ContentView: View {
 
 @main
 struct GemIOSDemoApp: App {
+
+    /// iOS 模拟器没有 `adb shell input tap` 那样的注入命令，
+    /// 用启动参数让自动化验证能直接跳到钱包页并触发生成：
+    ///   xcrun simctl launch <UDID> com.example.gemiosdemo -autowallet
+    /// 正常使用不带这个参数，仍然要手动点按钮。
+    static var autoWallet: Bool {
+        ProcessInfo.processInfo.arguments.contains("-autowallet")
+    }
+
     var body: some Scene {
-        WindowGroup { ContentView() }
+        WindowGroup {
+            TabView(selection: .constant(Self.autoWallet ? 1 : 0)) {
+                ContentView()
+                    .tabItem { Label("FFI", systemImage: "arrow.left.arrow.right") }
+                    .tag(0)
+                WalletView(autoGenerate: Self.autoWallet)
+                    .tabItem { Label("钱包", systemImage: "wallet.pass") }
+                    .tag(1)
+            }
+        }
     }
 }
