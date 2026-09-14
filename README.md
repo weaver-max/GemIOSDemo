@@ -96,7 +96,7 @@ final class NativeProvider: AlienProvider, @unchecked Sendable {
 
 ---
 
-## 3. 五个容易踩的坑
+## 3. 六个容易踩的坑
 
 ### 链名是字符串，不是枚举
 
@@ -138,6 +138,26 @@ resp.status   // ❌ 没这个属性
 ```
 
 它是给 Rust 消费的。要记状态码就在构造之前记。
+
+### Rust 对象要释放，且构造很贵
+
+`GemGateway` `GemKeystore` `GemSwapper` `GemMnemonic` 都实现了
+`Disposable` / `AutoCloseable` —— **它们持有 Rust 侧的堆内存**，
+不是普通的 Swift 对象。
+
+```swift
+// ❌ 每次调用都 new 一个
+func balance() async throws -> GemAssetBalance {
+    let gateway = GemGateway(provider: p, …)     // 每次都重建整套内部组件
+    return try await gateway.getBalanceCoin(chain: "ethereum", address: addr)
+}
+
+// ✅ 单例
+let gateway = GemGateway(provider: p, …)         // App 启动时建一次
+```
+
+`GemGateway` 构造时会建好 `chain_factory` / `api_client` / `yielder` /
+`swapper` / `status_provider` 一整套，不便宜。
 
 ### `createStore` 很慢，且不能写在 View 里
 

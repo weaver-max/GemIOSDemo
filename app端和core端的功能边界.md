@@ -272,7 +272,7 @@ URLSession 的连接池、HTTP/2、系统代理、证书固定、后台传输、
 let keystore = try GemKeystore(baseDir: 你选的目录)
 ```
 
-Rust 不决定放哪。选目录时注意备份策略，见 §6。
+Rust 不决定放哪。选目录时注意备份策略，见 §7。
 
 ### 除此之外 Rust 不碰任何文件
 
@@ -334,7 +334,64 @@ GemGateway(provider: ..., preferences: ..., securePreferences: ..., apiUrl: ...)
 
 ---
 
-## 6. 你独有的责任
+## 6. 接入顺序：先做什么后做什么
+
+前两步是**前置工作，不是可选的** —— 不做就什么都跑不起来。
+
+```
+1. 实现 AlienProvider          ← 不做这个，core 发不出任何请求
+2. 实现 GemPreferences ×2      ← GemGateway 构造要求（普通 + 安全各一个）
+3. 建单例 gateway / keystore
+4. 直接调方法（都是 async）
+5. 结果自己存 SQLite
+```
+
+### 第 1、2 步的产出
+
+```swift
+let provider = NativeProvider()                    // 你写的 AlienProvider
+let prefs = UserDefaultsPreferences()              // 普通
+let securePrefs = KeychainPreferences()            // 🔴 安全，别和上面共用
+
+// 单例，App 启动时建一次
+let gateway = GemGateway(provider: provider,
+                         preferences: prefs,
+                         securePreferences: securePrefs,
+                         apiUrl: apiUrl)
+let keystore = try GemKeystore(baseDir: keystoreDir)
+```
+
+### 第 4 步长什么样
+
+```swift
+// 查余额
+let balance = try await gateway.getBalanceCoin(chain: "ethereum", address: addr)
+let tokens = try await gateway.getBalanceTokens(chain: "ethereum",
+                                                address: addr,
+                                                tokenIds: idsFromDB)  // ← 来自后端
+
+// 发一笔交易：gateway 与 keystore 配合
+let preload = try await gateway.getTransactionPreload(chain: "ethereum", input: …)
+let fees = try await gateway.getFeeRates(chain: "ethereum", input: …)
+let signed = try keystore.sign(keystoreId: id, chain: "ethereum",
+                               input: signerInput, password: pwd)   // ← 唯一碰私钥的一步
+let hash = try await gateway.transactionBroadcast(chain: "ethereum",
+                                                  data: signed, options: …)
+let status = try await gateway.getTransactionStatus(chain: "ethereum", request: …)
+```
+
+**签名走 `GemKeystore`，其余走 `GemGateway`** —— 两个独立入口，职责不重叠。
+
+### ⚠️ 两个 demo 停在第 1 步
+
+demo 只实现了 `AlienProvider`，**没实现 `GemPreferences`**，
+所以接不了 `GemGateway` —— 这就是为什么里面只有钱包生成、没有余额查询。
+
+你们真要做链上功能时，第 2 步是最早会碰到的一件事。
+
+---
+
+## 7. 你独有的责任
 
 这些 core 完全不管，漏了不会报错，但会出事：
 
@@ -361,7 +418,7 @@ demo 的 `delete()` 是文件与清单一起清的，自检里有对应断言。
 
 ---
 
-## 7. 一句话记住
+## 8. 一句话记住
 
 > **Rust 管密码学和链上协议，你管其余一切。**
 >
