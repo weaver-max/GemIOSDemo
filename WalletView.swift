@@ -34,7 +34,7 @@ struct WalletView: View {
                     }
                 } footer: {
                     Text("每个钱包是一个助记词，下挂多条链的派生地址。"
-                         + "清单存在 UserDefaults，不含助记词 —— "
+                         + "清单存在 SQLite（wallets + wallets_accounts），不含助记词 —— "
                          + "详情页的助记词是从加密的 keystore 文件现场解出来的。")
                 }
 
@@ -67,24 +67,44 @@ struct WalletView: View {
 
     // ── 子视图 ──────────────────────────────────────────────
 
+    /// 每行直接把该钱包的全部派生地址摊开，不用点进详情才看得到。
     private func row(_ entry: WalletEntry) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                // 一个钱包 = 一个助记词，下面挂着多条链的派生地址
-                Text(entry.accounts.first?.address ?? "(无账户)")
-                    .font(.system(.footnote, design: .monospaced))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(entry.walletId)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text("\(entry.accounts.count) 条链 · "
-                     + entry.createdAt.formatted(date: .omitted, time: .standard))
+                Spacer()
+                Image(systemName: "chevron.right")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
             }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+
+            ForEach(entry.accounts) { account in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(account.chain)
+                        .font(.caption2).bold()
+                        .frame(width: 72, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(account.address)
+                            .font(.system(.caption2, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(account.derivationPath)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            Text("\(entry.accounts.count) 条链 · 同一助记词 · "
+                 + entry.createdAt.formatted(date: .omitted, time: .standard))
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
         }
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
     }
 

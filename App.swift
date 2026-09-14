@@ -93,6 +93,7 @@ struct ContentView: View {
 struct GemIOSDemoApp: App {
 
     /// iOS 模拟器没有 `adb shell input tap` 那样的注入命令，用启动参数替代：
+    ///   -ffi         启动落在 FFI 页（默认落在钱包页）
     ///   -wallet      跳到钱包页（只看，不生成）
     ///   -autowallet  跳到钱包页并生成一个钱包
     ///   -detail      跳到钱包页并打开最新一个钱包的详情
@@ -100,7 +101,8 @@ struct GemIOSDemoApp: App {
     private static let args = ProcessInfo.processInfo.arguments
     static var autoGenerate: Bool { args.contains("-autowallet") }
     static var autoDetail: Bool { args.contains("-detail") }
-    static var startOnWallet: Bool { autoGenerate || autoDetail || args.contains("-wallet") }
+    /// 默认就落在钱包页 —— 这是 demo 的主场；-ffi 才回到 FFI 页。
+    static var startOnWallet: Bool { !args.contains("-ffi") }
 
     /// 🔴 必须是 @State 而不是 .constant()。
     ///    .constant() 是只读绑定，Tab 会被焊死，用户点不动。
