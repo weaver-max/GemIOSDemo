@@ -8,7 +8,16 @@ struct AccountEntry: Codable, Equatable, Identifiable {
     let address: String
     let derivationPath: String
 
-    var id: String { chain }
+    /// BIP44 账户索引。
+    ///
+    /// 🔴 M1 恒为 0 —— core 的 `default_derivation_path(chain)` 返回编译期常量，
+    ///    一条链只能派生一个地址，做不了 MetaMask 那种 Account 1/2/3。
+    ///    字段先留着：core 支持后，数据结构与表结构都不用动，
+    ///    只需把 core 返回的真实 index 填进来。详见 README §5。
+    let index: Int
+
+    /// 同一条链将来会有多个账户，所以 id 必须带 index
+    var id: String { "\(chain)#\(index)" }
 }
 
 /// 钱包列表项 = 一个助记词。
@@ -90,9 +99,11 @@ enum WalletFactory {
             walletId: wallet.walletId,
             createdAt: Date(),
             accounts: wallet.accounts.map {
+                // core 暂不返回 index，M1 固定 0（见 AccountEntry.index 注释）
                 AccountEntry(chain: $0.chain,
                              address: $0.address,
-                             derivationPath: $0.derivationPath)
+                             derivationPath: $0.derivationPath,
+                             index: 0)
             }
         )
 
@@ -125,7 +136,8 @@ enum WalletFactory {
             .filter { !known.contains($0.chain) }
             .map { AccountEntry(chain: $0.chain,
                                 address: $0.address,
-                                derivationPath: $0.derivationPath) }
+                                derivationPath: $0.derivationPath,
+                                index: 0) }
 
         WalletStore.upsert(updated)
         return updated

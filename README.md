@@ -170,9 +170,13 @@ CREATE TABLE wallets_accounts (
     address         TEXT NOT NULL,
     derivation_path TEXT NOT NULL,
     account_index   INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (wallet_id, chain)
+    PRIMARY KEY (wallet_id, chain, account_index)
 );
 ```
+
+`account_index` **M1 恒为 0**，Swift 侧的 `AccountEntry.index` 也一样。
+后续 core 支持同链多账户时，数据结构与表结构都不用改，把真实 index 填进来即可。
+注意主键从一开始就带上了 `account_index` —— 只写 `(wallet_id, chain)` 的话将来会撞主键。
 
 **表里没有助记词和私钥的位置。** 这比写个检查函数更可靠 —— 想存秘密得先改表结构。
 
@@ -234,8 +238,12 @@ C=$(xcrun simctl get_app_container <UDID> com.example.gemiosdemo data)
 cat "$C/Documents/selftest.txt"
 ```
 
-跑 14 项：生成、多链派生、落盘、助记词解密、再派生后助记词与 walletId 不变、
-派生路径与地址的对应关系、数据库不含秘密、删除后文件与清单同步清理。
+跑 15 项：生成、多链派生、落盘、助记词解密、再派生后助记词与 walletId 不变、
+派生路径与地址的对应关系、`index` 恒为 0、数据库不含秘密、删除后文件与清单同步清理。
+
+> 「数据库不含助记词」这条查的是**连续两词**，不是单个词。
+> SQLite 把建表语句存进 `sqlite_master`，schema 里的 `index` `address`
+> 恰好都在 BIP39 词表里，逐词匹配必然误报。这条断言注入过假泄漏验证确实能抓到。
 
 其他参数：`-autowallet` 生成一个 · `-detail` 打开详情 · `-ffi` 落在 FFI 页。
 

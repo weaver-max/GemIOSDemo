@@ -59,7 +59,9 @@ final class WalletDatabase {
             address         TEXT NOT NULL,
             derivation_path TEXT NOT NULL,
             account_index   INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (wallet_id, chain)
+            -- 🔴 主键必须带 account_index。M1 它恒为 0，但将来同链多账户时
+            --    (wallet_id, chain) 会撞主键 —— 现在定对了以后就不用改表。
+            PRIMARY KEY (wallet_id, chain, account_index)
         );
         """)
         // account_index 现在恒为 0：core 的 default_derivation_path 是编译期常量，
@@ -80,12 +82,13 @@ final class WalletDatabase {
             return wallets.map { wallet in
                 var accounts: [AccountEntry] = []
                 query("""
-                SELECT chain, address, derivation_path FROM wallets_accounts
-                WHERE wallet_id = '\(escape(wallet.id))' ORDER BY rowid;
+                SELECT chain, address, derivation_path, account_index FROM wallets_accounts
+                WHERE wallet_id = '\(escape(wallet.id))' ORDER BY chain, account_index;
                 """) { stmt in
                     accounts.append(AccountEntry(chain: text(stmt, 0),
                                                  address: text(stmt, 1),
-                                                 derivationPath: text(stmt, 2)))
+                                                 derivationPath: text(stmt, 2),
+                                                 index: Int(sqlite3_column_int(stmt, 3))))
                 }
                 return WalletEntry(walletId: wallet.id, createdAt: wallet.createdAt, accounts: accounts)
             }
@@ -102,8 +105,8 @@ final class WalletDatabase {
             for a in entry.accounts {
                 exec("""
                 INSERT INTO wallets_accounts (wallet_id, chain, address, derivation_path, account_index)
-                VALUES ('\(escape(entry.walletId))', '\(escape(a.chain))', '\(escape(a.address))', '\(escape(a.derivationPath))', 0)
-                ON CONFLICT(wallet_id, chain) DO UPDATE SET
+                VALUES ('\(escape(entry.walletId))', '\(escape(a.chain))', '\(escape(a.address))', '\(escape(a.derivationPath))', \(a.index))
+                ON CONFLICT(wallet_id, chain, account_index) DO UPDATE SET
                     address = excluded.address,
                     derivation_path = excluded.derivation_path;
                 """)

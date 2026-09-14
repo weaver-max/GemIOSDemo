@@ -62,12 +62,25 @@ enum SelfTest {
             check("EVM 链共用地址", evm.count < 2 || Set(evm.map(\.address)).count == 1,
                   evm.map(\.chain).joined(separator: "/"))
 
-            // 6. 直接扫数据库文件的原始字节 —— 比查字段更硬，
-            //    连写进未使用列或残留页的情况都能抓到。
+            // M1 的约定：index 恒为 0。core 支持同链多账户后这条会失败 ——
+            // 那正是提醒去把真实 index 填进来的时刻。
+            check("account index 恒为 0（M1）", added.accounts.allSatisfy { $0.index == 0 })
+
+            // 6. 数据库不含秘密。
+            //
+            // ⚠️ 不能拿单个词去子串匹配整个文件 —— SQLite 会把建表语句存进
+            //    sqlite_master，schema 里的 "index" "address" 这些恰好都在 BIP39
+            //    词表里，必然误报。（我第一版就是这么写的，FAIL 了才发现。）
+            //
+            //    改用连续两词：助记词真泄漏时一定是整串落盘，
+            //    而 schema 的英文不可能凑出助记词里的相邻词对。
             let dbBytes = (try? Data(contentsOf: URL(fileURLWithPath: WalletDatabase.databasePath))) ?? Data()
             let raw = String(decoding: dbBytes, as: UTF8.self)
-            check("数据库不含助记词", !words.contains { raw.contains($0) },
-                  "\(dbBytes.count) 字节")
+            let pairs = zip(words, words.dropFirst()).map { "\($0) \($1)" }
+            let leaked = pairs.filter { raw.contains($0) }
+            check("数据库不含助记词", leaked.isEmpty,
+                  leaked.isEmpty ? "\(dbBytes.count) 字节 / 查了 \(pairs.count) 组词对"
+                                 : "🔴 命中 \(leaked)")
             check("数据库不含 keystoreId", !raw.contains(w.keystoreId))
 
             // 7. 删除：文件与清单都要清
