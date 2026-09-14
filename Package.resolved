@@ -1,0 +1,15 @@
+{
+  "originHash" : "0c5b8a5d74c67a7ed55aae040243b0df2b2711c6838599d11f333df981665c80",
+  "pins" : [
+    {
+      "identity" : "gemstone-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/weaver-max/gemstone-swift.git",
+      "state" : {
+        "revision" : "5410b64ed16ab3624eb194534066043aee6dd226",
+        "version" : "2.114.10"
+      }
+    }
+  ],
+  "version" : 3
+}
