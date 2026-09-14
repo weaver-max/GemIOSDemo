@@ -284,6 +284,26 @@ Xcode 会自动选。手工编译要显式指向对的那个。
 
 ---
 
+## 6.5 自检
+
+iOS 模拟器没法注入点击，功能验证靠启动参数跑无头自检：
+
+```bash
+xcrun simctl launch <UDID> com.example.gemiosdemo -selftest
+sleep 20
+C=$(xcrun simctl get_app_container <UDID> com.example.gemiosdemo data)
+cat "$C/Documents/selftest.txt"
+```
+
+覆盖 14 项：生成 / 多链派生 / 落盘 / 助记词解密 / 再派生后助记词与 walletId 不变 /
+派生路径与地址的对应关系 / 清单不含秘密 / 删除后文件与清单同步移除。
+
+> ⚠️ 写自检时踩过一个坑：一开始断言「所有地址互不相同」，结果 FAIL。
+> **EVM 系列链共用 `m/44'/60'/0'/0/0`，ethereum 和 polygon 本来就是同一个地址** ——
+> 是断言写错了不是代码有问题。正确的不变量是「同路径必同地址，异路径必异地址」。
+
+---
+
 ## 7. 延伸阅读
 
 | 文档 | 内容 |
@@ -306,6 +326,7 @@ GemIOSDemo/
 ├── WalletView.swift   钱包列表 + 生成
 ├── WalletStore.swift  列表持久化 + WalletFactory（创建/解密/删除）
 ├── WalletDetailView.swift  详情：助记词现场解密
+├── SelfTest.swift     无头自检（-selftest）
 ├── build.sh           五步构建脚本
 ├── README.md          本文件 —— 怎么调用
 └── SIMULATOR.md       模拟器选择与注意事项

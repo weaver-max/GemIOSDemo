@@ -106,6 +106,8 @@ struct GemIOSDemoApp: App {
     ///    .constant() 是只读绑定，Tab 会被焊死，用户点不动。
     @State private var tab = GemIOSDemoApp.startOnWallet ? 1 : 0
 
+    init() { SelfTest.runIfRequested() }
+
     var body: some Scene {
         WindowGroup {
             TabView(selection: $tab) {

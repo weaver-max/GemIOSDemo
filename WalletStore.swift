@@ -1,20 +1,33 @@
 import Foundation
 import Gemstone
 
-/// 钱包列表项。
-///
-/// 🔴 注意这里**没有助记词、没有私钥**。
-///    Rust 只按 keystoreId 收活，从不告诉你有哪些钱包（GemKeystore 没有任何
-///    list/getAll 接口），所以这份清单必须由 App 自己维护。
-///    但清单里只放「找得回来」所需的最小信息，秘密仍然躺在加密的 keystore 文件里。
-struct WalletEntry: Codable, Identifiable, Equatable {
-    let walletId: String
-    let keystoreId: String
+/// 一个账户 = 一条链上的派生地址。
+/// 同一个钱包下的所有账户都来自**同一个助记词**，只是派生路径不同。
+struct AccountEntry: Codable, Equatable, Identifiable {
     let chain: Chain
     let address: String
+    let derivationPath: String
+
+    var id: String { chain }
+}
+
+/// 钱包列表项 = 一个助记词。
+///
+/// 🔴 这里**没有助记词、没有私钥、没有密码**。
+///    Rust 只按 keystoreId 收活，从不告诉你有哪些钱包（GemKeystore 没有
+///    list/getAll 接口），所以清单必须 App 自己维护 ——
+///    但只放「找得回来」所需的最小信息，秘密留在加密的 keystore 文件里。
+struct WalletEntry: Codable, Identifiable, Equatable {
+    let walletId: String
     let createdAt: Date
+    var accounts: [AccountEntry]
 
     var id: String { walletId }
+
+    /// 🔴 不存，现算。
+    ///    keystoreId 是 walletId 的 UUID v5 派生值（确定性），存进清单是冗余，
+    ///    冗余字段迟早会和真值不一致。需要时调 keystoreIdForWallet() 即可。
+    var keystoreId: String { keystoreIdForWallet(walletId: walletId) }
 }
 
 /// 列表持久化。
@@ -23,10 +36,18 @@ struct WalletEntry: Codable, Identifiable, Equatable {
 ///    gem 主 App 走的是 GRDB，两张表：
 ///      wallets(id, name, type, index, order, isPinned, imageUrl, source, updatedAt)
 ///      wallets_accounts(walletId, chain, address, derivationPath, extendedPublicKey, index)
-///    用数据库的关键原因是**响应式查询**：数据一变 UI 自动刷新。
+///    注意这个「一对多」结构和下面的 WalletEntry.accounts 是同一个意思。
+///    用数据库的关键原因是**响应式查询**：数据一变 UI 自动刷新，
 ///    UserDefaults 没有这个能力，所以本 demo 得手动 reload。
 enum WalletStore {
     private static let key = "gem.demo.wallets"
+
+    /// 🔴 清单里允许出现的字段白名单。
+    ///    助记词、私钥、密码一律不得进入 —— 它存在 UserDefaults，
+    ///    既不加密也会进 iTunes/iCloud 备份。秘密只能留在加密的 keystore 文件里。
+    ///    save() 会强制校验，加了新字段忘记评估敏感性时会崩在 debug 构建。
+    private static let allowedWalletKeys: Set<String> = ["walletId", "createdAt", "accounts"]
+    private static let allowedAccountKeys: Set<String> = ["chain", "address", "derivationPath"]
 
     static func all() -> [WalletEntry] {
         guard let data = UserDefaults.standard.data(forKey: key),
@@ -35,8 +56,10 @@ enum WalletStore {
         return list.sorted { $0.createdAt > $1.createdAt }
     }
 
-    static func add(_ entry: WalletEntry) {
-        save(all() + [entry])
+    static func upsert(_ entry: WalletEntry) {
+        var list = all().filter { $0.walletId != entry.walletId }
+        list.append(entry)
+        save(list)
     }
 
     static func remove(walletId: String) {
@@ -45,7 +68,28 @@ enum WalletStore {
 
     private static func save(_ list: [WalletEntry]) {
         guard let data = try? JSONEncoder().encode(list) else { return }
+        assertNoSecrets(data)
         UserDefaults.standard.set(data, forKey: key)
+    }
+
+    /// 把「清单不许存秘密」从注释约定变成运行时强制。
+    /// 只在 debug 生效，release 构建零开销。
+    private static func assertNoSecrets(_ data: Data) {
+        #if DEBUG
+        guard let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return }
+        for wallet in arr {
+            let extra = Set(wallet.keys).subtracting(allowedWalletKeys)
+            assert(extra.isEmpty,
+                   "WalletEntry 出现未经评估的字段 \(extra)。"
+                   + "确认不含助记词/私钥/密码后，再加进 allowedWalletKeys。")
+
+            for account in (wallet["accounts"] as? [[String: Any]]) ?? [] {
+                let e = Set(account.keys).subtracting(allowedAccountKeys)
+                assert(e.isEmpty, "AccountEntry 出现未经评估的字段 \(e)。")
+            }
+        }
+        #endif
     }
 }
 
@@ -55,6 +99,18 @@ enum WalletStore {
 ///    把这些方法写进 View 里的话，即使包在 Task.detached 中也会被弹回主 actor，
 ///    Argon2id（19 MiB / 2 轮）照样卡 UI，且 Swift 6 语言模式下是编译错误。
 enum WalletFactory {
+
+    /// 建钱包时默认派生这几条链的地址，全部来自同一个助记词。
+    static let defaultChains: [Chain] = ["ethereum", "solana", "bitcoin"]
+
+    /// 详情页可以再补的链。
+    /// ⚠️ 链名是裸字符串（`typealias Chain = String`），拼错不报编译错误。
+    ///    core 也没导出「全量链列表」接口，只能照 Rust 侧 Chain 枚举手抄
+    ///    （strum serialize_all = "lowercase"，所以 SmartChain → "smartchain"）。
+    static let extraChains: [Chain] = [
+        "smartchain", "polygon", "arbitrum", "optimism", "base",
+        "avalanchec", "cosmos", "tron", "ton", "sui", "aptos", "doge",
+    ]
 
     /// 演示用固定密码。真实产品必须来自用户输入，
     /// 并用 Keychain + 生物识别保护，绝不能硬编码。
@@ -69,42 +125,76 @@ enum WalletFactory {
         return base.path
     }()
 
-    /// 生成新钱包：助记词 → keystore 落盘 → 记进列表
-    static func create(chain: Chain = "ethereum") throws -> WalletEntry {
+    private static func keystore() throws -> GemKeystore {
+        try GemKeystore(baseDir: keystoreDirectory)
+    }
+
+    /// 生成新钱包：一个助记词 → 多条链的派生地址 → keystore 落盘 → 记进清单
+    static func create(chains: [Chain] = defaultChains) throws -> WalletEntry {
         let words = try GemMnemonic().generate(wordCount: 12)
 
-        let keystore = try GemKeystore(baseDir: keystoreDirectory)
-        let wallet = try keystore.createStore(
-            import: .multicoinPhrase(words: words, chains: [chain]),
+        let wallet = try keystore().createStore(
+            import: .multicoinPhrase(words: words, chains: chains),
             password: demoPassword
         )
 
         let entry = WalletEntry(
             walletId: wallet.walletId,
-            keystoreId: wallet.keystoreId,
-            chain: chain,
-            address: wallet.accounts.first?.address ?? "(无账户)",
-            createdAt: Date()
+            createdAt: Date(),
+            accounts: wallet.accounts.map {
+                AccountEntry(chain: $0.chain,
+                             address: $0.address,
+                             derivationPath: $0.derivationPath)
+            }
         )
-        WalletStore.add(entry)
+
+        // 把「keystoreId 由 walletId 派生」这条关系钉死：
+        // core 若改了派生规则，这里立刻炸，而不是等到解密时报文件找不到。
+        assert(entry.keystoreId == wallet.keystoreId,
+               "keystoreIdForWallet 推导值与 createStore 返回值不一致："
+               + "\(entry.keystoreId) vs \(wallet.keystoreId)")
+
+        WalletStore.upsert(entry)
         return entry
+    }
+
+    /// 给已有钱包补链 —— 仍是同一个助记词派生出来的地址。
+    ///
+    /// ⚠️ gem 导出的 API 只支持「一条链一个地址」：
+    ///    addAccounts 只接受 chains，没有 index 参数，
+    ///    GemKeystoreAccount 也没有 index 字段。
+    ///    所以做不了 MetaMask 那种同链多账户（Account 1 / 2 / 3）。
+    static func addChains(_ entry: WalletEntry, chains: [Chain]) throws -> WalletEntry {
+        let added = try keystore().addAccounts(
+            keystoreId: entry.keystoreId,
+            password: demoPassword,
+            chains: chains
+        )
+
+        var updated = entry
+        let known = Set(entry.accounts.map(\.chain))
+        updated.accounts += added
+            .filter { !known.contains($0.chain) }
+            .map { AccountEntry(chain: $0.chain,
+                                address: $0.address,
+                                derivationPath: $0.derivationPath) }
+
+        WalletStore.upsert(updated)
+        return updated
     }
 
     /// 取回助记词。
     ///
-    /// 🔴 这才是重点：助记词**没有存在任何地方**，
+    /// 🔴 重点：助记词**没有存在任何地方**，
     ///    是现场从加密的 keystore 文件里解出来的。
     ///    真实产品调这个之前必须过生物识别。
     static func recoveryPhrase(keystoreId: String) throws -> [String] {
-        let keystore = try GemKeystore(baseDir: keystoreDirectory)
-        return try keystore.exportRecoveryPhrase(keystoreId: keystoreId,
-                                                 password: demoPassword)
+        try keystore().exportRecoveryPhrase(keystoreId: keystoreId, password: demoPassword)
     }
 
-    /// 删除钱包：keystore 文件 + 列表记录都要清
+    /// 删除钱包：keystore 文件 + 清单记录都要清，否则会留下孤儿文件
     static func delete(_ entry: WalletEntry) throws {
-        let keystore = try GemKeystore(baseDir: keystoreDirectory)
-        _ = try keystore.delete(keystoreId: entry.keystoreId)
+        _ = try keystore().delete(keystoreId: entry.keystoreId)
         WalletStore.remove(walletId: entry.walletId)
     }
 

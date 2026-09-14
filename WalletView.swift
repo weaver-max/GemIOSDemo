@@ -33,8 +33,9 @@ struct WalletView: View {
                         Text(error).font(.footnote).foregroundStyle(.red)
                     }
                 } footer: {
-                    Text("列表存在 UserDefaults；助记词不在列表里，"
-                         + "点进详情时才从加密的 keystore 文件解出来。")
+                    Text("每个钱包是一个助记词，下挂多条链的派生地址。"
+                         + "清单存在 UserDefaults，不含助记词 —— "
+                         + "详情页的助记词是从加密的 keystore 文件现场解出来的。")
                 }
 
                 Section("钱包（\(entries.count)）") {
@@ -50,7 +51,9 @@ struct WalletView: View {
             }
             .navigationTitle("钱包")
             .sheet(item: $selected) { entry in
-                WalletDetailView(entry: entry) { remove(entry) }
+                WalletDetailView(entry: entry,
+                                 onDelete: { remove(entry) },
+                                 onChange: { _ in reload() })
             }
         }
         .task {
@@ -67,11 +70,13 @@ struct WalletView: View {
     private func row(_ entry: WalletEntry) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
-                Text(entry.address)
+                // 一个钱包 = 一个助记词，下面挂着多条链的派生地址
+                Text(entry.accounts.first?.address ?? "(无账户)")
                     .font(.system(.footnote, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text("\(entry.chain) · \(entry.createdAt.formatted(date: .omitted, time: .standard))")
+                Text("\(entry.accounts.count) 条链 · "
+                     + entry.createdAt.formatted(date: .omitted, time: .standard))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

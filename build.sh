@@ -60,7 +60,7 @@ swiftc -target "$TARGET" -sdk "$SDK" -parse-as-library \
     -I build -I "$XCF/Headers" \
     -L build -lGemstoneSwift \
     -L "$XCF" -lgemstone \
-    App.swift WalletView.swift WalletStore.swift WalletDetailView.swift -o build/GemIOSDemo
+    App.swift WalletView.swift WalletStore.swift WalletDetailView.swift SelfTest.swift -o build/GemIOSDemo
 info "可执行文件 $(du -h build/GemIOSDemo | cut -f1)"
 
 # 自检：确认不是误编成 macOS 产物
