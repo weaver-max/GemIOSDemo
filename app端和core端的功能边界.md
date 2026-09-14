@@ -24,7 +24,98 @@
 
 ---
 
-## 1. 网络：一个字节都不由 Rust 发出
+## 1. 接口的两个方向：谁调用谁
+
+生成的绑定里有 22 个 interface/protocol，看起来都像"回调接口"，**其实只有 2 个是你实现的。**
+
+### 🔵 你实现，Rust 调用（只有这两个）
+
+| 接口 | 你提供 |
+|---|---|
+| `AlienProvider` | 发 HTTP |
+| `GemPreferences` | 键值读写 |
+
+**不实现这两个，core 跑不起来。**
+
+### ⚪ Rust 对象，你只能调用（其余全部）
+
+```
+GemKeystore      GemMnemonic      GemSwapper       GemGateway
+Explorer         Config           BalanceCalculator
+CryptoFiatConverter               MessageSigner    Perpetual
+Hyperliquid      WalletConnect    PriceAlertFormatter
+PriceChangeCalculator             AutocloseValidator
+GemServiceStatus WalletConnectSimulationClient     AlienResponse
+```
+
+UniFFI 会给每个 `uniffi::Object` 自动生成一个同名接口，**方向是平台 → Rust**。
+你不需要也不应该实现它们。
+
+> ⚠️ 命名差异：Swift 侧后缀是 `Protocol`（`GemKeystoreProtocol`），
+> Kotlin 侧是 `Interface`（`GemKeystoreInterface`）。
+> 看到这两个后缀就知道是 Rust 对象，不是给你实现的。
+
+### 怎么一眼分辨
+
+带后缀 = Rust 对象。不带 = 你要实现的。
+
+要严格验证，查生成物里的 callback vtable —— 这是 UniFFI 编译期产物，绕不过去：
+
+```bash
+grep -oE "UniffiVTableCallbackInterface[A-Za-z]+" <绑定文件> | sort -u
+# 双端输出一致，且只有两条：
+#   UniffiVTableCallbackInterfaceAlienProvider
+#   UniffiVTableCallbackInterfaceGemPreferences
+```
+
+---
+
+## 2. 数据往哪走：三条路
+
+```
+① Rust 主动调你 —— 只有上面那两个接口
+   AlienProvider   ──►  你发 HTTP
+   GemPreferences  ──►  你读写键值
+
+② 你调 Rust，把数据当参数喂进去   ← 关系型数据走这条
+   totalFiatValue(balances: [AssetFiatValue])      ← 余额是你查好传进来的
+   encodeGetAccounts(chain, accounts: [Account])   ← 账户列表你传进来
+   calculateTransferAmount(input)
+
+③ 你自己闭环，Rust 完全不参与
+   排序 SQL、分页、搜索、列表刷新、UI 状态
+```
+
+### 🔴 Rust 不是不需要关系型数据
+
+而是**数据由你当参数传进去**。Rust 对数据库无状态、不感知表结构。
+
+`totalFiatValue(balances)` 就是典型：你从库里捞出余额列表 → 传给 Rust 算总资产
+→ 拿回 `TotalFiatValue` → 你决定显示还是入库。
+
+这比"把 repository 抽象成 FFI 接口"好在四点：
+
+| | 参数传入（现状） | repository 抽象 |
+|---|---|---|
+| 查询语句 | 你写，想怎么 join 怎么 join | 受 trait 签名限制 |
+| 响应式 | ✅ `ValueObservation` / `Flow` 照常 | ❌ 只能拿快照 |
+| FFI 往返 | 只在需要计算时过一次 | 每次查询都过 |
+| 可测性 | 纯函数，单测不用 mock | 持有回调，要 mock |
+
+> 📌 上游从未把 repository/storage 抽象成 FFI 接口。
+> 如果有人提议"查询经过 core 统一规范"，**这条要挡住** ——
+> 响应式查询会废掉，而那正是当初把数据库留在平台侧的首要原因。
+
+### 分辨纯函数还是会回调你
+
+看是不是 `async` / `suspend`：
+
+- **纯函数**：`totalFiatValue` `calculateTransferAmount` `validateAddress` —— 进什么出什么
+- **会回调你**：`getBalanceTokens` `getBalanceEarn` —— 内部要发 HTTP，走 ① 那条路
+
+---
+
+## 3. 网络：一个字节都不由 Rust 发出
 
 ### 实测证据
 
@@ -105,7 +196,7 @@ URLSession 的连接池、HTTP/2、系统代理、证书固定、后台传输、
 
 ---
 
-## 2. 存储：只有一类文件归 Rust
+## 4. 存储：只有一类文件归 Rust
 
 ### Rust 唯一持有的存储
 
@@ -138,7 +229,7 @@ URLSession 的连接池、HTTP/2、系统代理、证书固定、后台传输、
 let keystore = try GemKeystore(baseDir: 你选的目录)
 ```
 
-Rust 不决定放哪。选目录时注意备份策略，见 §4。
+Rust 不决定放哪。选目录时注意备份策略，见 §6。
 
 ### 除此之外 Rust 不碰任何文件
 
@@ -166,7 +257,7 @@ Rust 从不告诉你有哪些钱包，它只按 id 干活。**你不自己记，
 
 ---
 
-## 3. `GemPreferences`：一个"半 Rust"的存储
+## 5. `GemPreferences`：一个"半 Rust"的存储
 
 这是最容易误解的一处。
 
@@ -200,7 +291,7 @@ GemGateway(provider: ..., preferences: ..., securePreferences: ..., apiUrl: ...)
 
 ---
 
-## 4. 你独有的责任
+## 6. 你独有的责任
 
 这些 core 完全不管，漏了不会报错，但会出事：
 
@@ -227,7 +318,7 @@ demo 的 `delete()` 是文件与清单一起清的，自检里有对应断言。
 
 ---
 
-## 5. 一句话记住
+## 7. 一句话记住
 
 > **Rust 管密码学和协议，你管 I/O 和展示。**
 >
