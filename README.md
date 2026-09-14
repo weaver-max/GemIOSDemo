@@ -7,16 +7,41 @@ iOS 端调用 Rust 编译产物（`gemstone-swift`）的最小可运行示例。
 | Tab | 演示什么 |
 |---|---|
 | **FFI** | `libVersion()` 正向调用 + `AlienProvider` 反向回调 |
-| **钱包** | 生成助记词 → 建 keystore → 落盘 → 显示地址 |
+| **钱包** | 列表 + 生成 + 详情（助记词现场解密） |
 
 ```
-FFI                              钱包
-Gemstone lib version: 2.114.10   助记词 dutch pistol summer …
-https://httpbin.org/get?foo=bar  walletId   multicoin_0x1C20…
--> 200, 464 bytes                keystoreId 995a0d9c-f1a3-5d95-…
-                                 地址       0x1C20353b00aE4642…
-                                 ✓ keystore 文件已写入 (630 字节)
+FFI                              钱包列表          点进详情
+Gemstone lib version: 2.114.10   0xF03A75f5…        地址/链/walletId/keystoreId
+https://httpbin.org/get?foo=bar  0x9681c8A6…        助记词（由 keystore 现场解密）
+-> 200, 464 bytes                                   ✓ keystore 文件存在 620 字节
 ```
+
+### 🔴 钱包列表必须 App 自己存
+
+`GemKeystore` 的 9 个方法（`createStore` `sign` `delete` `exportPrivateKey`
+`exportRecoveryPhrase` `addAccounts` `previewImport` `signAuth` `migrateV3`）
+**没有任何 list / getAll**，而且除 `createStore` 外每个都要求传入 `keystoreId`。
+
+Rust 从不告诉你有哪些钱包 —— 它只按 id 收活。App 不自己记，生成完就再也找不回来。
+
+| | 存什么 | 在哪 |
+|---|---|---|
+| Rust | 加密的密钥材料 | `<baseDir>/<keystoreId>.json`，一钱包一文件 |
+| App | 钱包清单与元数据 | SQLite（本 demo 用 UserDefaults 从简） |
+
+清单里**只放找得回来所需的最小信息**，秘密仍留在加密文件里。实测 UserDefaults 内容：
+
+```json
+[{ "walletId": "multicoin_0x98200302…", "keystoreId": "b74f9283-…",
+   "chain": "ethereum", "address": "0x98200302…", "createdAt": 811068890.39 }]
+```
+
+助记词一个字都没有 —— 详情页的助记词是 `exportRecoveryPhrase()` 现场解出来的，
+所以杀掉 App 重启后照样能显示。
+
+> 真实产品应该用 SQLite 而非 UserDefaults，关键原因是**响应式查询**：
+> GRDB / Room 能在数据变化时自动刷新 UI，UserDefaults 只能手动 reload。
+> gem 主 App 的两张表：`wallets` 与 `wallets_accounts`。
 
 ```bash
 ./build.sh                    # 编译 + 装进模拟器 + 启动
@@ -278,7 +303,9 @@ Xcode 会自动选。手工编译要显式指向对的那个。
 GemIOSDemo/
 ├── Package.swift      依赖 gemstone-swift 2.114.10
 ├── App.swift          Tab 容器 + FFI 页（AlienProvider 实现）
-├── WalletView.swift   钱包页（生成 → 落盘 → 显示地址）
+├── WalletView.swift   钱包列表 + 生成
+├── WalletStore.swift  列表持久化 + WalletFactory（创建/解密/删除）
+├── WalletDetailView.swift  详情：助记词现场解密
 ├── build.sh           五步构建脚本
 ├── README.md          本文件 —— 怎么调用
 └── SIMULATOR.md       模拟器选择与注意事项

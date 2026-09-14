@@ -92,21 +92,28 @@ struct ContentView: View {
 @main
 struct GemIOSDemoApp: App {
 
-    /// iOS 模拟器没有 `adb shell input tap` 那样的注入命令，
-    /// 用启动参数让自动化验证能直接跳到钱包页并触发生成：
-    ///   xcrun simctl launch <UDID> com.example.gemiosdemo -autowallet
-    /// 正常使用不带这个参数，仍然要手动点按钮。
-    static var autoWallet: Bool {
-        ProcessInfo.processInfo.arguments.contains("-autowallet")
-    }
+    /// iOS 模拟器没有 `adb shell input tap` 那样的注入命令，用启动参数替代：
+    ///   -wallet      跳到钱包页（只看，不生成）
+    ///   -autowallet  跳到钱包页并生成一个钱包
+    ///   -detail      跳到钱包页并打开最新一个钱包的详情
+    /// 正常使用不带参数，从 FFI 页进，钱包要手点按钮生成。
+    private static let args = ProcessInfo.processInfo.arguments
+    static var autoGenerate: Bool { args.contains("-autowallet") }
+    static var autoDetail: Bool { args.contains("-detail") }
+    static var startOnWallet: Bool { autoGenerate || autoDetail || args.contains("-wallet") }
+
+    /// 🔴 必须是 @State 而不是 .constant()。
+    ///    .constant() 是只读绑定，Tab 会被焊死，用户点不动。
+    @State private var tab = GemIOSDemoApp.startOnWallet ? 1 : 0
 
     var body: some Scene {
         WindowGroup {
-            TabView(selection: .constant(Self.autoWallet ? 1 : 0)) {
+            TabView(selection: $tab) {
                 ContentView()
                     .tabItem { Label("FFI", systemImage: "arrow.left.arrow.right") }
                     .tag(0)
-                WalletView(autoGenerate: Self.autoWallet)
+                WalletView(autoGenerate: Self.autoGenerate,
+                           autoOpenDetail: Self.autoDetail)
                     .tabItem { Label("钱包", systemImage: "wallet.pass") }
                     .tag(1)
             }
