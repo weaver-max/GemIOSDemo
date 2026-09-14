@@ -14,13 +14,21 @@
 ① 后端索引器  ──直连──►  你  ──►  SQLite      有什么
    Rust 完全不参与                              代币列表 / 交易历史 / 价格 / NFT
 
-② 链上 RPC    ──►  Rust 解析  ──►  你  ──►  SQLite      现在是多少
-   请求仍由你的 AlienProvider 发出              余额 / nonce / gas / 广播
+② 经 Rust 取数，四个入口  ──►  你  ──►  SQLite      现在是多少
+   链上 RPC    ──► GemGateway                  余额 / nonce / gas / 广播
+   DEX 聚合器  ──► GemSwapper                  兑换报价与路由
+   模拟服务    ──► WalletConnectSimulationClient
+   gem 后端    ──► GemServiceStatus            服务健康检查
+   ❗四者的请求全部由你的 AlienProvider 发出
 
 ③ keystore    ──►  Rust 独占                   加密的助记词
 ```
 
 **后端告诉你「有什么」，链上告诉你「现在是多少」。**
+
+> 📌 **判断某个 Rust 对象会不会发网络，看它构造时要不要传 `AlienProvider`。**
+> 全仓库只有上面四个要传。其余对象（`GemKeystore` `GemMnemonic` `Explorer`…）
+> 都是纯本地计算。
 
 ---
 
@@ -108,9 +116,40 @@ POST /v2/devices/scan/transaction     交易风险扫描
 
 ---
 
-## 3. 链上 RPC：经过 Rust 的 28 个方法
+## 3. 经过 Rust 的四个入口
 
-全在 `GemGateway` 上，全是 `async`：
+### 3.1 判断方法：构造要不要传 `AlienProvider`
+
+```
+GemGateway(provider, prefs, securePrefs, apiUrl)   ← 要传 → 会发网络
+GemSwapper(provider)                                ← 要传 → 会发网络
+GemServiceStatus(provider)                          ← 要传 → 会发网络
+WalletConnectSimulationClient(provider)             ← 要传 → 会发网络
+
+GemKeystore(baseDir)      ← 不传 → 纯本地
+GemMnemonic()             ← 不传 → 纯本地
+Explorer / Config / …     ← 不传 → 纯本地
+```
+
+**全仓库只有这四个对象能发网络**，而且都用同一个 `AlienProvider` 实例：
+
+```swift
+let provider = NativeProvider()      // 你只需要写一个
+
+GemGateway(provider: provider, …)
+GemSwapper(rpcProvider: provider)
+GemServiceStatus(provider: provider)
+```
+
+所以抓包能看到全部流量，限流 / 重试 / 证书固定在一处加就够。
+
+> 💡 `GemGateway` 构造时会给 provider 包一层 `coalescing_provider` ——
+> 同一时刻打到同一 target 的重复请求自动合并（列表刷新余额时很有用）。
+> **你不用自己去重。** 但 `GemSwapper` 和 `GemServiceStatus` 没有这层。
+
+### 3.2 `GemGateway`：28 个方法
+
+全是 `async`：
 
 | 类别 | 方法 |
 |---|---|
@@ -124,7 +163,7 @@ POST /v2/devices/scan/transaction     交易风险扫描
 | **永续** | `getPositions` `getPerpetual*` ×4 |
 | 🔴 后端 | `getTransactionScan`（唯一例外） |
 
-### 节点是你指定的
+### 3.3 节点是你指定的
 
 ```swift
 func getEndpoint(chain: Chain) throws -> String {
@@ -138,7 +177,7 @@ Rust 问你要节点地址，然后自己拼出完整 URL，再通过 `AlienProv
 > 你查了哪些地址的余额。对隐私有要求的话，这里要换自建节点或付费服务。
 > 这是产品与成本决策，core 解决不了。
 
-### 有几个不是纯链上
+### 3.4 有几个不是纯链上
 
 | 方法 | 实际打到哪 |
 |---|---|
@@ -147,6 +186,17 @@ Rust 问你要节点地址，然后自己拼出完整 URL，再通过 `AlienProv
 
 所以「链上 RPC」这个说法对余额、交易、UTXO 是准的，
 但理财和永续实际是在调第三方协议接口。
+
+### 3.5 另外三个入口
+
+| 对象 | 用途 | 打到哪 |
+|---|---|---|
+| `GemSwapper` | 兑换报价与路由 | 各 DEX 聚合器的 API |
+| `GemServiceStatus` | 服务健康检查 | gem 后端 |
+| `WalletConnectSimulationClient` | WalletConnect 交易模拟 | 模拟服务 |
+
+M1 若要做兑换，`GemSwapper` 是除 `GemGateway` 外最主要的一个，
+它的依赖与数据来源需要单独摸一遍 —— 本文未覆盖。
 
 ---
 
