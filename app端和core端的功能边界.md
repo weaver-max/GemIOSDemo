@@ -2,7 +2,10 @@
 
 哪些事 Rust 做，哪些事 iOS 做。**以及为什么这么切。**
 
-一句话概括：**Rust 负责计算与协议，平台负责 I/O。**
+一句话概括：**Rust 只管密码学与链上协议，其余全归平台。**
+
+具体说：后端 API 你直连，本地存储你全包，网络 I/O 你来发；
+Rust 负责的是私钥、签名、链上请求的构造与解析，以及若干双端必须一致的业务规则。
 
 本文结论均为实测，验证命令附在各节。环境：`gemstone-swift 2.114.10` · 2026-09-14
 
@@ -12,11 +15,13 @@
 
 | | Rust (core) | iOS (你) |
 |---|---|---|
-| **网络** | 构造请求、解析响应 | ❗**真的发出去** |
+| **后端 API**（资产/价格/配置/设备/订阅） | — | ❗**全部直连，Rust 不参与** |
+| 交易风险扫描 | 唯一经过 Rust 的后端调用 | 发出请求 |
+| **链上 RPC** | 构造请求、解析响应 | ❗**真的发出去** |
 | WebSocket | 造订阅报文、解析消息 | ❗**开连接、维持、重连** |
 | **密钥文件** | ❗**读写加密的 keystore** | 提供目录路径 |
 | 私钥派生 / 签名 | ❗**全部** | 拿签名结果 |
-| 钱包清单、交易、余额 | — | ❗**全部（数据库）** |
+| **所有数据的存储与查询** | — | ❗**全部（SQLite）** |
 | 偏好设置 | 决定存什么 key | ❗**提供存储介质（两套）** |
 | UI、生物识别、备份策略 | — | ❗**全部** |
 
@@ -70,10 +75,48 @@ grep -oE "UniffiVTableCallbackInterface[A-Za-z]+" <绑定文件> | sort -u
 
 ---
 
-## 2. 数据往哪走：三条路
+## 2. 数据往哪走
+
+### 2.1 三个来源，只有一个不在你手里
 
 ```
-① Rust 主动调你 —— 只有上面那两个接口
+后端 API  ──直连──►  你 ──► SQLite        资产 / 价格 / 配置 / 设备 / 订阅
+                            ↑              ❗Rust 完全不参与
+                            │
+链上 RPC  ──►  Rust 解析 ────┘             余额 / 交易记录 / nonce
+              （请求仍经你的 AlienProvider 发出）
+
+keystore  ──►  Rust 独占                   加密的助记词
+```
+
+**🔴 后端数据的绝大部分由你直连获取，Rust 从头到尾没见过。**
+
+gem 主 App 的 `GemAPI` 包里这些全是 App 自己发、自己解析、自己入库：
+
+```
+getAssets / getAsset / getCharts / getConfig / getAddressNames
+getBuyableFiatAssets / addPriceAlerts / addSubscriptions
+addDevice / getDevice / isDeviceRegistered / getNodeAuthToken / createReferral …
+```
+
+经过 Rust 的后端调用**只有一个**：
+
+```rust
+// core/gemstone/src/api_client/mod.rs —— 整个文件就这一个公开方法
+pub async fn scan_transaction(&self, payload) -> Result<ScanTransaction, String>
+```
+
+交易风险扫描。这也是 `GemGateway(...)` 要传 `apiUrl` 的唯一原因 ——
+不调 `getTransactionScan()` 的话传占位符都行。
+
+> ⚠️ **排期时注意**：后端 API 对接的工作量和 core 无关，
+> 不能因为"有 Rust 核心库"就从双端工作量里扣掉。
+> 资产、价格、行情、设备注册、订阅这些接口，双端各要写一遍。
+
+### 2.2 你和 Rust 之间：三个调用方向
+
+```
+① Rust 主动调你 —— 只有 §1 那两个接口
    AlienProvider   ──►  你发 HTTP
    GemPreferences  ──►  你读写键值
 
@@ -83,7 +126,7 @@ grep -oE "UniffiVTableCallbackInterface[A-Za-z]+" <绑定文件> | sort -u
    calculateTransferAmount(input)
 
 ③ 你自己闭环，Rust 完全不参与
-   排序 SQL、分页、搜索、列表刷新、UI 状态
+   后端 API 对接、排序 SQL、分页、搜索、列表刷新、UI 状态
 ```
 
 ### 🔴 Rust 不是不需要关系型数据
@@ -320,10 +363,11 @@ demo 的 `delete()` 是文件与清单一起清的，自检里有对应断言。
 
 ## 7. 一句话记住
 
-> **Rust 管密码学和协议，你管 I/O 和展示。**
+> **Rust 管密码学和链上协议，你管其余一切。**
 >
-> 唯一的例外是 keystore 文件 —— 因为私钥不能过 FFI，
-> 加解密必须在 Rust 内部闭环完成。
+> 后端 API 直连你发、本地数据库你建、网络 I/O 你执行；
+> Rust 只在两件事上不可替代：私钥不能过 FFI（所以 keystore 归它），
+> 以及双端必须一致的规则（不一致就是 bug）。
 
 ---
 
