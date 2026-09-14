@@ -12,6 +12,9 @@ iOS 怎么调用 Rust 编译出来的 gem 核心库。一个能跑的最小例�
 
 App 有两页：**钱包**（生成、看地址、看助记词）和 **FFI**（版本号、网络回调）。
 
+> 📐 **先搞清楚谁负责什么**：[App 端和 Core 端的功能边界](app端和core端的功能边界.md)
+> —— 网络全部由你发（core 里没编译 HTTP 客户端）、存储只有 keystore 文件归 Rust。
+
 ---
 
 ## 1. 接入
@@ -275,6 +278,7 @@ WalletDatabase.swift     SQLite
 SelfTest.swift           无头自检
 build.sh                 一键构建运行
 SIMULATOR.md             模拟器选择与注意事项
+app端和core端的功能边界.md   网络与存储的职责划分
 ```
 
 > ⚠️ 本项目用 `swiftc` 手工编译、手工组 `.app`，**不是** Xcode 工程。
@@ -282,6 +286,7 @@ SIMULATOR.md             模拟器选择与注意事项
 
 更多背景：
 
+- [App 端和 Core 端的功能边界](app端和core端的功能边界.md) —— 网络与存储的职责划分，附实测证据
 - [完整集成指南](https://github.com/weaver-max/gemstone-swift/blob/main/iOS-Integration-Guide.md) —— API 逐个讲
 - gem 仓库根目录的 `gem私钥管理.md`、`旧钱包存量迁移.md`、
   `ios跑模拟器出现的问题以及解决.md`
