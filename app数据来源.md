@@ -15,7 +15,8 @@
    Rust 完全不参与                              代币列表 / 交易历史 / 价格 / NFT
 
 ② 经 Rust 取数，四个入口  ──►  你  ──►  SQLite      现在是多少
-   链上 RPC    ──► GemGateway                  余额 / nonce / gas / 广播
+   链上 RPC    ──► GemGateway                  余额 / 手续费预估 / nonce
+                                              广播 / 交易状态 / 质押
    DEX 聚合器  ──► GemSwapper                  兑换报价与路由
    模拟服务    ──► WalletConnectSimulationClient
    gem 后端    ──► GemServiceStatus            服务健康检查
