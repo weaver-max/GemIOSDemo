@@ -87,8 +87,9 @@ grep -oE "UniffiVTableCallbackInterface[A-Za-z]+" <绑定文件> | sort -u
 链上 RPC  ──►  Rust 解析 ────┘             余额 / 交易记录 / nonce
               （请求仍经你的 AlienProvider 发出）
 
-你自己产生 ──► SQLite                     地址簿 / 自定义节点 / 偏好 / 钱包名与排序
-                                           ❗Rust 和后端都不参与
+你自己闭环 ──► SQLite                     钱包表 / 账户表 / 地址簿 / 自定义节点
+                                           偏好 / 钱包名与排序 / 搜索
+                                           ❗存储、更新、查询全是你写
 
 keystore  ──►  Rust 独占                   加密的助记词
 ```

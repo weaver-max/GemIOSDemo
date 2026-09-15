@@ -21,8 +21,9 @@
    gem 后端    ──► GemServiceStatus            服务健康检查
    ❗四者的请求全部由你的 AlienProvider 发出
 
-③ 你自己产生  ──►  SQLite                     用户设的
-   Rust 和后端都不参与                          联系人 / 自定义节点 / 偏好 / 钱包名与排序
+③ 你自己闭环  ──►  SQLite                     存储/更新/查询全是你写
+   Rust 和后端都不参与                          钱包表 / 账户表 / 联系人 / 自定义节点
+                                               偏好 / 钱包名与排序 / 搜索
 
 ④ keystore    ──►  Rust 独占                   加密的助记词
 ```
@@ -231,6 +232,7 @@ gem 主 App 里的例子（这些表在后端端点里零匹配）：
 
 | 表 | 内容 |
 |---|---|
+| `wallets` / `wallets_accounts` | **钱包与账户表** —— 见下方说明 |
 | `contacts` / `contacts_addresses` | 地址簿 —— 用户自己存的收款人 |
 | `nodes` / `nodes_selected` | 用户自定义的 RPC 节点与选中项 |
 | `wallets` 的 `name` `order` `isPinned` | 钱包起名、排序、置顶 |
@@ -238,6 +240,33 @@ gem 主 App 里的例子（这些表在后端端点里零匹配）：
 | `search` | 搜索索引与历史 |
 | `wallets_connections` | WalletConnect 会话 |
 | 各类偏好 | 主题、语言、通知开关、法币单位 |
+
+### 账户表：值来自 Rust，表归你
+
+`wallets_accounts` 稍微特殊，值得单独说清楚：
+
+```
+createStore / addAccounts  ──►  Rust 一次性派生出 chain / address / derivationPath
+                                 ↓
+                            你存进表里
+                                 ↓
+                 此后 Rust 再也不会来读 —— 它没有任何读回账户的接口
+```
+
+**Rust 侧只有两个和账户相关的导出：**
+
+| 方向 | 方法 |
+|---|---|
+| Rust → 你 | `addAccounts(...)` 派生并返回（一次性） |
+| 你 → Rust | `encodeGetAccounts(chain, accounts)` · `configSessionProperties(..., accounts)` |
+
+**没有 `getAccounts` / `listAccounts`。** 所以：
+
+- 表结构你定 —— 想加 `name` `order` `isPinned` 这些 Rust 不知道的字段，随便加
+- 查询你写 —— 排序、过滤、join 全是你的 SQL
+- WalletConnect 场景需要账户时，**你当参数传回去**（走 §3 的路径②）
+
+所以从工作量角度看，账户表和联系人表没有区别：**都是你从零建、从零查。**
 
 ### 🔴 别把这类需求提给 core
 
