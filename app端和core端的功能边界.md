@@ -24,7 +24,7 @@ Rust 负责的是私钥、签名、链上请求的构造与解析，以及若干
 | 私钥派生 / 签名 | ❗**全部** | 拿签名结果 |
 | **自有功能**（地址簿/节点/偏好/搜索） | — | ❗**完全闭环，core 不参与** |
 | **所有数据的存储与查询** | — | ❗**全部（SQLite）** |
-| 偏好设置 | 决定存什么 key | ❗**提供存储介质（两套）** |
+| 偏好设置 | 决定存什么 key | ❗**必须实现两套**（普通 + 安全） |
 | UI、生物识别、备份策略 | — | ❗**全部** |
 
 ❗ = 这一方**必须**实现，缺了另一方跑不起来。
@@ -341,8 +341,36 @@ GemGateway(provider: ..., preferences: ..., securePreferences: ..., apiUrl: ...)
 第二个是给敏感数据用的。两个都传普通存储能跑，但等于把该进 Keychain 的东西
 明文写进了 plist。
 
-> 两个 demo 里都没用到（只演示钱包生成），但接入 `GemGateway` 做真实链上操作时
-> **必须提供**。
+### 🔴 这是硬性要求，不是可选项
+
+`GemGateway` 的构造函数**要求四个参数**，少一个编译都过不了：
+
+```
+GemGateway(provider, preferences, securePreferences, apiUrl)
+                     ^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^
+                     两个都必须给，且必须是两个不同的实现
+```
+
+**没有 `GemGateway` 就查不了余额、发不了交易。**
+所以只要做链上功能，`GemPreferences` 就和 `AlienProvider` 一样是必做项。
+
+### 谁在用它
+
+实测追下来，**目前只有 HyperCore（永续合约）这条链会真正读写**：
+
+| 用途 | 走哪套 |
+|---|---|
+| agent 私钥（代理签名用，需跨会话复用） | 🔴 `securePreferences` |
+| 预加载缓存标记 | `preferences` |
+
+其余链（BTC / EVM / Solana / Sui…）构造时根本不传 preferences。
+
+> ⚠️ **但别因此糊弄。** 接口必须实现、必须传，而且从一开始就该按正确方式写 ——
+> 普通那套用 UserDefaults，安全那套用 Keychain。
+> 几十行的事，等哪天上永续合约再补容易漏，而漏的后果是**私钥明文落盘**。
+
+两个 demo 只演示钱包生成（不碰 `GemGateway`），所以没实现它 ——
+这也是为什么 demo 里没有余额查询。
 
 ---
 
@@ -351,12 +379,16 @@ GemGateway(provider: ..., preferences: ..., securePreferences: ..., apiUrl: ...)
 前两步是**前置工作，不是可选的** —— 不做就什么都跑不起来。
 
 ```
-1. 实现 AlienProvider          ← 不做这个，core 发不出任何请求
-2. 实现 GemPreferences ×2      ← GemGateway 构造要求（普通 + 安全各一个）
+1. 实现 AlienProvider          ❗不做，core 发不出任何请求
+2. 实现 GemPreferences ×2      ❗不做，GemGateway 构造不出来
+                                 （普通 + 安全各一个，不能指向同一个）
 3. 建单例 gateway / keystore
 4. 直接调方法（都是 async）
 5. 结果自己存 SQLite
 ```
+
+**第 1、2 步都是硬性前置**：`AlienProvider` 缺了发不出请求，
+`GemPreferences` 缺了连 `GemGateway` 都构造不出来 —— 编译期就过不去。
 
 ### 第 1、2 步的产出
 
