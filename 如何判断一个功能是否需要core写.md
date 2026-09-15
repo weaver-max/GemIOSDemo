@@ -1,6 +1,8 @@
 # 如何判断一个功能该谁写
 
-开发新功能前先过一遍这张卡片，决定是自己写还是找 core。
+开发新功能前先过一遍这张卡片。
+
+**顺序是：先查 core 有没有现成的 → 再判断该谁写。**
 
 ---
 
@@ -10,6 +12,51 @@
 > 其余全在 App。**
 
 关系型数据的存储、更新、查询，**core 一概不参与**。
+
+---
+
+## 第 0 步：core 里是不是已经有了？
+
+**这一步排在最前面 —— 重复造轮子比划错边界更常见。**
+
+现有导出规模不小，光靠印象记不住：
+
+```
+206 个函数  ·  21 个可用对象  ·  绑定文件 27,000+ 行
+```
+
+### 怎么查
+
+直接在生成的绑定文件里搜关键词，**不要问，先搜**：
+
+```bash
+# Android
+K=.../uniffi/gemstone/gemstone.kt
+grep -oiE 'fun .[a-z][a-zA-Z]*(你的关键词)[a-zA-Z]*.\([^)]*\)' "$K" | sort -u
+
+# iOS
+S=.../Sources/Gemstone/Gemstone.swift
+grep -oiE 'func [a-z][a-zA-Z]*(你的关键词)[a-zA-Z]*\([^)]*\)' "$S" | sort -u
+```
+
+举例 —— 想做地址校验，搜 `valid|address`：
+
+```
+checksumAddress(address, chain)          EIP-55 大小写
+formatAddress(address, chain, style)     格式化显示
+getAddressUrl(explorerName, address)     区块浏览器链接
+validateAddress(address, chain)          ← 就是它
+```
+
+**四个现成的，一个都不用自己写。**
+
+### 搜不到再往下走
+
+确认 core 里没有之后，再进入下面的三步判断。
+
+> 💡 搜不到也可能是**名字不一样**。比如「手续费」在 core 里叫 `feeRates`、
+> 「交易记录」相关的叫 `transactionStatus`。多试几个同义词，
+> 或者直接翻一遍 `GemGateway` 的 28 个方法 —— 链上能力基本都在那。
 
 ---
 
